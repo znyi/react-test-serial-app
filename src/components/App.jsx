@@ -7,6 +7,23 @@ const defaultParity = 'none'
 const defaultStopBits = 1
 const defaultFlowControl = 'none'
 
+class LineBreakTransformer {
+    constructor() {
+      this.container = '';
+    }
+  
+    transform(chunk, controller) {
+      this.container += chunk;
+      const lines = this.container.split(' '); //'\r\n');
+      this.container = lines.pop();
+      lines.forEach(line => controller.enqueue(line));
+    }
+  
+    flush(controller) {
+      controller.enqueue(this.container);
+    }
+  }
+
 function App() {
     const [port, setPort] = useState(null)
 
@@ -16,6 +33,7 @@ function App() {
     const [isReading, setIsReading] = useState(false)
     const readableStreamClosed = useRef(null)
     const reader = useRef(null)
+    var readerAccumulated = ''
 
 
     async function handleConnection(){
@@ -64,7 +82,7 @@ function App() {
                     setIsReading(true)
                     var textDecoder = new TextDecoderStream();
                     readableStreamClosed.current = port.readable.pipeTo(textDecoder.writable);
-                    reader.current = textDecoder.readable.getReader()
+                    reader.current = textDecoder.readable.pipeThrough(new TransformStream(new LineBreakTransformer())).getReader()
                     try {
                         while (true) {
                             const { value, done } = await reader.current.read()
@@ -73,7 +91,9 @@ function App() {
                               reader.current.releaseLock()
                               break
                             }
-                            setReadDataContent(value)
+                            readerAccumulated += value + '\n'
+                            console.log(`i read value = ${value}`)
+                            setReadDataContent(readerAccumulated)
                         }
                     } catch (err){
                         console.log(`error in handleReadPort: ${err}`)
@@ -102,6 +122,7 @@ function App() {
             console.log(`error in handleChangeWriteBufferContent: ${err}`)
         } finally {
             writer.releaseLock();
+            console.log(`i wrote: "${encoder.encode(writeBufferContent)}"`)
             console.log(`i wrote: "${writeBufferContent}"`)
             setWriteBufferContent("")
         }
