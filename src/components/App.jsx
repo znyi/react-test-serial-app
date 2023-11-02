@@ -14,7 +14,6 @@ function App() {
     const [readDataContent, setReadDataContent] = useState('')
 
     const [isReading, setIsReading] = useState(false)
-    var textDecoder
     const readableStreamClosed = useRef(null)
     const reader = useRef(null)
 
