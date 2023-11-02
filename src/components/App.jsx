@@ -137,9 +137,7 @@ function App() {
         try {
             var mystr = writeBufferContent
             var myarr = mystr.split(' ').map(elem => parseInt(elem))
-            //myarr.push(0x0D) //\r, 13
-            //myarr.push(0x0A) //\n, 10
-            var mybuf = new Uint8Array(myarr) //[... , 13, 10]
+            var mybuf = new Uint8Array(myarr)
             console.log('i write')
             console.log(mybuf)
             await writer.write(mybuf)
@@ -147,16 +145,15 @@ function App() {
             console.log(`error in handleChangeWriteBufferContent: ${err}`)
         } finally {
             writer.releaseLock();
-            console.log(`i wrote: "${writeBufferContent}"`)
             setWriteBufferContent("")
         }
     }
 
     async function handleReadPort(){
         setIsReading(true)
-        var noDecoder = new TransformStream();
-        readableStreamClosed.current = port.readable.pipeTo(noDecoder.writable);
-        reader.current = noDecoder.readable.pipeThrough(new TransformStream(new LineBreakTransformer())).getReader()
+        var lineBreakTransformStream = new TransformStream(new LineBreakTransformer());
+        readableStreamClosed.current = port.readable.pipeTo(lineBreakTransformStream.writable);
+        reader.current = lineBreakTransformStream.readable.getReader()
         
         try {
             while (true) {
@@ -166,12 +163,10 @@ function App() {
                   reader.current.releaseLock()
                   break
                 }
-                console.log('-------------start read value')
-                console.log(value)
                 readerAccumulated += value+'\n'
-                console.log(`i read value = ${value}`)
+                console.log('i read')
+                console.log(value)
                 setReadDataContent(readerAccumulated)
-                console.log('-------------end read value')
             }
         } catch (err){
             console.log(`error in handleReadPort: ${err}`)
