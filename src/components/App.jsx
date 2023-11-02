@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 
-const defaultBaudRate = 9600
+const defaultBaudRate = 115200
 const defaultBufferSize = 255
 const defaultDataBits = 8
 const defaultParity = 'none'
@@ -8,19 +8,59 @@ const defaultStopBits = 1
 const defaultFlowControl = 'none'
 
 class LineBreakTransformer {
+
+    terminator = [0x0D, 0x0A] //\r\n
+    terminatorIndex
+
     constructor() {
-      this.container = '';
+      this.container = [];
     }
   
     transform(chunk, controller) {
-      this.container += chunk;
-      const lines = this.container.split(' '); //'\r\n');
-      this.container = lines.pop();
-      lines.forEach(line => controller.enqueue(line));
+        
+        // Append everything in chunk to the container
+        chunk.forEach(elem=>this.container.push(elem));
+      
+    
+        // Find the index of the terminator in the container
+        this.terminatorIndex = this.indexOfSubarray(this.container, this.terminator);
+
+        while (this.terminatorIndex !== -1) {
+          // Extract the line (including terminator) from the container
+          const line = this.container.slice(0, this.terminatorIndex + this.terminator.length);
+        
+          // Enqueue the line
+          controller.enqueue(new Uint8Array(line.slice(0, -2))); //do not include \r and \n
+
+          // Remove the processed line from the container
+          this.container = this.container.slice(this.terminatorIndex + this.terminator.length);
+
+          // Find the next occurrence of the terminator in the remaining container
+          this.terminatorIndex = this.indexOfSubarray(this.container, this.terminator);
+        }
     }
-  
+
     flush(controller) {
-      controller.enqueue(this.container);
+        if (this.container.length > 0) {
+            controller.enqueue(new Uint8Array(this.container));
+            console.log('lineFlushed')
+            console.log(this.container)
+        }
+    }
+
+    indexOfSubarray(array, subArray) {
+      // Helper function to find the index of subArray in array
+      for (let i = 0; i <= array.length - subArray.length; i++) {
+        if (this.arraysEqual(array.slice(i, i + subArray.length), subArray)) {
+          return i;
+        }
+      }
+      return -1;
+    }
+
+    arraysEqual(arr1, arr2) {
+      // Helper function to check if two arrays are equal
+      return arr1.length === arr2.length && arr1.every((value, index) => value === arr2[index]);
     }
   }
 
@@ -46,10 +86,7 @@ function App() {
         } else {
             setWriteBufferContent('')
             //stop reading port
-            setIsReading(false)
-            setReadDataContent('')
-            reader.current.cancel();
-            await readableStreamClosed.current.catch(() => { /* Ignore the error */ }); 
+            await handleStopReadingPort()
             try {
                 await port.close()
                 setPort(null)
@@ -79,25 +116,7 @@ function App() {
                         vendor id: ${port.getInfo().usbVendorId} \n
                         product id:  ${port.getInfo().usbProductId}`);
                     //read
-                    setIsReading(true)
-                    var textDecoder = new TextDecoderStream();
-                    readableStreamClosed.current = port.readable.pipeTo(textDecoder.writable);
-                    reader.current = textDecoder.readable.pipeThrough(new TransformStream(new LineBreakTransformer())).getReader()
-                    try {
-                        while (true) {
-                            const { value, done } = await reader.current.read()
-                            if (done) {
-                              // |reader| has been canceled.
-                              reader.current.releaseLock()
-                              break
-                            }
-                            readerAccumulated += value + '\n'
-                            console.log(`i read value = ${value}`)
-                            setReadDataContent(readerAccumulated)
-                        }
-                    } catch (err){
-                        console.log(`error in handleReadPort: ${err}`)
-                    }
+                    //...
                 } catch (err) {
                     console.log(err)
                     alert(`Failed to open serial port.\nThe port might be already open, or there might be something wrong with the device.`)
@@ -115,16 +134,56 @@ function App() {
 
     async function handleWritePort(){
         const writer = port.writable.getWriter()
-        const encoder = new TextEncoder()
         try {
-            await writer.write(encoder.encode(writeBufferContent))
+            var mystr = writeBufferContent
+            var myarr = mystr.split(' ').map(elem => parseInt(elem))
+            //myarr.push(0x0D) //\r, 13
+            //myarr.push(0x0A) //\n, 10
+            var mybuf = new Uint8Array(myarr) //[... , 13, 10]
+            console.log('i write')
+            console.log(mybuf)
+            await writer.write(mybuf)
         } catch (err) {
             console.log(`error in handleChangeWriteBufferContent: ${err}`)
         } finally {
             writer.releaseLock();
-            console.log(`i wrote: "${encoder.encode(writeBufferContent)}"`)
             console.log(`i wrote: "${writeBufferContent}"`)
             setWriteBufferContent("")
+        }
+    }
+
+    async function handleReadPort(){
+        setIsReading(true)
+        var noDecoder = new TransformStream();
+        readableStreamClosed.current = port.readable.pipeTo(noDecoder.writable);
+        reader.current = noDecoder.readable.pipeThrough(new TransformStream(new LineBreakTransformer())).getReader()
+        
+        try {
+            while (true) {
+                const { value, done } = await reader.current.read()
+                if (done) {
+                  // |reader| has been canceled.
+                  reader.current.releaseLock()
+                  break
+                }
+                console.log('-------------start read value')
+                console.log(value)
+                readerAccumulated += value+'\n'
+                console.log(`i read value = ${value}`)
+                setReadDataContent(readerAccumulated)
+                console.log('-------------end read value')
+            }
+        } catch (err){
+            console.log(`error in handleReadPort: ${err}`)
+        }
+    }
+
+    async function handleStopReadingPort(){
+        if(isReading){
+            setIsReading(false)
+            setReadDataContent('')
+            reader.current.cancel();
+            await readableStreamClosed.current.catch(() => { /* Ignore the error */ }); 
         }
     }
 
@@ -149,6 +208,9 @@ function App() {
             <div className="part">
                 <h3>read port</h3>
                 <textarea value={readDataContent} disabled={true} placeholder={port!==null? (isReading? readDataContent:''):"port is not connected"}></textarea>
+                <div>
+                    <button onClick={isReading? handleStopReadingPort:handleReadPort} disabled={port!==null? false:true}>{isReading? 'stop read':'read'}</button>
+                </div>
             </div>
         </div>
     </div>
