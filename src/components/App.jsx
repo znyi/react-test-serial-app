@@ -1,125 +1,138 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
+
+const defaultBaudRate = 9600
+const defaultBufferSize = 255
+const defaultDataBits = 8
+const defaultParity = 'none'
+const defaultStopBits = 1
+const defaultFlowControl = 'none'
 
 function App() {
-    var [isConnected, setIsConnected] = useState(false);
-    var [conBtnText, setConBtnText] = useState("connect");
-    var [port, setPort] = useState(null);
-  
-    var [isWriting, setIsWriting] = useState(false);
-  var [writeBtnText, setWriteBtnText] = useState("write something");
+    const [port, setPort] = useState(null)
 
-  var [isReading, setIsReading] = useState(false);
-  var [readBtnText, setReadBtnText] = useState("start reading");
-  
+    const [writeBufferContent, setWriteBufferContent] = useState('')
+    const [readDataContent, setReadDataContent] = useState('')
 
-  const usbVendorId = 2389;
-  const usbProductId = 28704;
-  const portRequestOption = {
-    filters: [{ usbVendorId, usbProductId }],
-  };
-  const portOpenOption = {
-    baudRate: 9600,
-    dataBits: 8,
-    stopBits: 1,
-    bufferSize: 255,
-    parity: "none",
-    flowControl: "none",
-  };
+    const [isReading, setIsReading] = useState(false)
+    var textDecoder
+    const readableStreamClosed = useRef(null)
+    const reader = useRef(null)
 
-  async function handleConnect() {
-    if (!isConnected) {
-      try {
-        setPort(await navigator.serial.requestPort());
-      } catch (e) {
-        alert(e);
-      }
-    } else {
-      try {
-        await port.close();
-        setPort(null);
-        setIsConnected(false);
-        setConBtnText("connect");
-        alert(`disconnected \n
-                vendor id: ${port.getInfo().usbVendorId} \n
-                product id:  ${port.getInfo().usbProductId}`);
-      } catch (e) {
-        alert(e);
-      }
-    }
-  }
 
-  useEffect(() => {
-    if (port !== null) {
-      port.open(portOpenOption);
-      setIsConnected(true);
-      setConBtnText("disconnect");
-      alert(`connected \n
-                  vendor id: ${port.getInfo().usbVendorId} \n
-                  product id:  ${port.getInfo().usbProductId}`);
-    }
-  }, [port]);
-  
-    async function handleWriteData() {
-      const writer = port.writable.getWriter();
-      const encoder = new TextEncoder();
-      const input = prompt("enter what you want to write: ");
-      setIsWriting(true);
-      try {
-        await writer.write(encoder.encode(input));
-      } catch (e) {
-        alert(e);
-      } finally {
-        writer.releaseLock();
-        alert(`i wrote: "${input}"`);
-      }
-    }
-
-    async function handleReadData() {
-      let reader = port.readable.getReader();
-      const decoder = new TextDecoder();
-      if (reader && !isReading) {
-        setIsReading(true);
-        setReadBtnText("stop reading");
-        alert("started reading");
-        while (port.readable) {
-          try {
-            while (true) {
-              const { value, done } = await reader.read();
-              if (done) {
-                // |reader| has been canceled.
-                alert("end");
-                break;
-              }
-              // Do something with |value|…
-              const str = decoder.decode(value);
-              alert(`i read: "${str}"`);
+    async function handleConnection(){
+        if (port === null) {
+            try {
+                setPort(await navigator.serial.requestPort())
+            } catch (err) {
+                console.log(`error in requestPort: no port is chosen.\n\nerror message:\n${err}`)
             }
-          } catch (e) {
-            alert(e);
-          } finally {
-            reader.releaseLock();
-            reader = null;
-            alert("stopped reading");
-          }
+        } else {
+            setWriteBufferContent('')
+            //stop reading port
+            setIsReading(false)
+            setReadDataContent('')
+            reader.current.cancel();
+            await readableStreamClosed.current.catch(() => { /* Ignore the error */ }); 
+            try {
+                await port.close()
+                setPort(null)
+                alert(`disconnected \n
+                     vendor id: ${port.getInfo().usbVendorId} \n
+                     product id:  ${port.getInfo().usbProductId}`)
+            } catch (err) {
+                console.log(`error in handleConnection: ${err}`)
+            }
         }
-      } else {
-        if (reader) {
-          reader.cancel();
-          reader = null;
-          setIsReading(false);
-          setReadBtnText("start reading");
-          alert("stopped reading");
+    }
+
+    useEffect(() => {
+        async function tryOpenPort(){
+            if (port !== null) {
+                try{
+                    const portOpenOption = {
+                        baudRate: defaultBaudRate,
+                        dataBits: defaultDataBits,
+                        stopBits: defaultStopBits,
+                        bufferSize: defaultBufferSize,
+                        parity: defaultParity,
+                        flowControl: defaultFlowControl,
+                    };
+                    await port.open(portOpenOption);
+                    alert(`connected \n
+                        vendor id: ${port.getInfo().usbVendorId} \n
+                        product id:  ${port.getInfo().usbProductId}`);
+                    //read
+                    setIsReading(true)
+                    var textDecoder = new TextDecoderStream();
+                    readableStreamClosed.current = port.readable.pipeTo(textDecoder.writable);
+                    reader.current = textDecoder.readable.getReader()
+                    try {
+                        while (true) {
+                            const { value, done } = await reader.current.read()
+                            if (done) {
+                              // |reader| has been canceled.
+                              reader.current.releaseLock()
+                              break
+                            }
+                            setReadDataContent(value)
+                        }
+                    } catch (err){
+                        console.log(`error in handleReadPort: ${err}`)
+                    }
+                } catch (err) {
+                    console.log(err)
+                    alert(`Failed to open serial port.\nThe port might be already open, or there might be something wrong with the device.`)
+                    setPort(null)
+                }
+            }
         }
-      }
+        tryOpenPort()
+    }, [port])
+
+
+    function handleChangeWriteBufferContent({target}){
+        setWriteBufferContent(target.value)
+    }
+
+    async function handleWritePort(){
+        const writer = port.writable.getWriter()
+        const encoder = new TextEncoder()
+        try {
+            await writer.write(encoder.encode(writeBufferContent))
+        } catch (err) {
+            console.log(`error in handleChangeWriteBufferContent: ${err}`)
+        } finally {
+            writer.releaseLock();
+            console.log(`i wrote: "${writeBufferContent}"`)
+            setWriteBufferContent("")
+        }
     }
 
   return (
     <div className="App">
-      <button onClick={handleConnect}>{conBtnText}</button>
-      <button onClick={handleWriteData}>{writeBtnText}</button>
-      <button onClick={handleReadData}>{readBtnText}</button>
+        <div className="container">
+            <div className="part">
+                <h3>connect port</h3>
+                <div className='portConnectionGroup'>
+                    <div>
+                    <button onClick={handleConnection} >{port!==null? 'disconnect':'connect'}</button>
+                    </div>
+                </div>
+            </div>
+            <div className="part">
+                <h3>write port</h3>
+                <textarea type="text" value={writeBufferContent} onChange={handleChangeWriteBufferContent} disabled={port!==null? false:true} placeholder={port!==null? "write something":"port is not connected"}></textarea> 
+                <div>
+                    <button onClick={handleWritePort} disabled={port!==null? false:true}>write</button>
+                </div>
+            </div>
+            <div className="part">
+                <h3>read port</h3>
+                <textarea value={readDataContent} disabled={true} placeholder={port!==null? (isReading? readDataContent:''):"port is not connected"}></textarea>
+            </div>
+        </div>
     </div>
   );
 }
 
-export default App;
+export default App
