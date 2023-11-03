@@ -1,79 +1,60 @@
 import React, { useState, useEffect, useRef } from "react";
+import DropDown from "./DropDown";
 
-const defaultBaudRate = 115200
+const baudRateOptions = [
+    9600,
+    14400,
+    19220,
+    28800,
+    38400,
+    57600,
+    115200,
+    230400,
+    260800,
+    921600,
+    //'custom'
+]
+const dataBitsOptions = [
+    7, 
+    8
+]
+const parityOptions = [
+    'none',
+    'even',
+    'odd'
+]
+const stopBitsOptions = [
+    1, 
+    2
+]
+const FlowControlOptions = [
+    'none', 
+    'hardware'
+]
+const defaultBaudRate = 9600
 const defaultBufferSize = 255
 const defaultDataBits = 8
 const defaultParity = 'none'
 const defaultStopBits = 1
 const defaultFlowControl = 'none'
 
-class LineBreakTransformer {
-
-    terminator = [0x0D, 0x0A] //\r\n
-    terminatorIndex
-
-    constructor() {
-      this.container = [];
-    }
-  
-    transform(chunk, controller) {
-        
-        // Append everything in chunk to the container
-        chunk.forEach(elem=>this.container.push(elem));
-      
-    
-        // Find the index of the terminator in the container
-        this.terminatorIndex = this.indexOfSubarray(this.container, this.terminator);
-
-        while (this.terminatorIndex !== -1) {
-          // Extract the line (including terminator) from the container
-          const line = this.container.slice(0, this.terminatorIndex + this.terminator.length);
-        
-          // Enqueue the line
-          controller.enqueue(new Uint8Array(line.slice(0, -2))); //do not include \r and \n
-
-          // Remove the processed line from the container
-          this.container = this.container.slice(this.terminatorIndex + this.terminator.length);
-
-          // Find the next occurrence of the terminator in the remaining container
-          this.terminatorIndex = this.indexOfSubarray(this.container, this.terminator);
-        }
-    }
-
-    flush(controller) {
-        if (this.container.length > 0) {
-            controller.enqueue(new Uint8Array(this.container));
-            console.log('lineFlushed')
-            console.log(this.container)
-        }
-    }
-
-    indexOfSubarray(array, subArray) {
-      // Helper function to find the index of subArray in array
-      for (let i = 0; i <= array.length - subArray.length; i++) {
-        if (this.arraysEqual(array.slice(i, i + subArray.length), subArray)) {
-          return i;
-        }
-      }
-      return -1;
-    }
-
-    arraysEqual(arr1, arr2) {
-      // Helper function to check if two arrays are equal
-      return arr1.length === arr2.length && arr1.every((value, index) => value === arr2[index]);
-    }
-  }
-
 function App() {
     const [port, setPort] = useState(null)
+
+    const [baudRate, setBaudRate] = useState(defaultBaudRate)
+    const [bufferSize, setBufferSize] = useState(defaultBufferSize)
+    const [dataBits, setDataBits] = useState(defaultDataBits)
+    const [parity, setParity] = useState(defaultParity)
+    const [stopBits, setStopBits] = useState(defaultStopBits)
+    const [flowControl, setFlowControl] = useState(defaultFlowControl)
 
     const [writeBufferContent, setWriteBufferContent] = useState('')
     const [readDataContent, setReadDataContent] = useState('')
 
     const [isReading, setIsReading] = useState(false)
+    var textDecoder
     const readableStreamClosed = useRef(null)
     const reader = useRef(null)
-    var readerAccumulated = ''
 
 
     async function handleConnection(){
@@ -85,8 +66,6 @@ function App() {
             }
         } else {
             setWriteBufferContent('')
-            //stop reading port
-            await handleStopReadingPort()
             try {
                 await port.close()
                 setPort(null)
@@ -104,19 +83,17 @@ function App() {
             if (port !== null) {
                 try{
                     const portOpenOption = {
-                        baudRate: defaultBaudRate,
-                        dataBits: defaultDataBits,
-                        stopBits: defaultStopBits,
-                        bufferSize: defaultBufferSize,
-                        parity: defaultParity,
-                        flowControl: defaultFlowControl,
+                        baudRate: baudRate,
+                        dataBits: dataBits,
+                        stopBits: stopBits,
+                        bufferSize: bufferSize,
+                        parity: parity,
+                        flowControl: flowControl,
                     };
                     await port.open(portOpenOption);
                     alert(`connected \n
                         vendor id: ${port.getInfo().usbVendorId} \n
                         product id:  ${port.getInfo().usbProductId}`);
-                    //read
-                    //...
                 } catch (err) {
                     console.log(err)
                     alert(`Failed to open serial port.\nThe port might be already open, or there might be something wrong with the device.`)
@@ -125,8 +102,23 @@ function App() {
             }
         }
         tryOpenPort()
-    }, [port])
+    }, [baudRate, bufferSize, dataBits, flowControl, parity, port, stopBits])
 
+    function handleChangeOption({target}){
+        if (target.name === 'baudRate') {
+            setBaudRate(target.value);
+        } else if (target.name === 'dataBits'){
+            setDataBits(target.value)
+        } else if (target.name === 'parity'){
+            setParity(target.value)
+        } else if (target.name === 'stopBits'){
+            setStopBits(target.value)
+        } else if (target.name === 'flowControl'){
+            setFlowControl(target.value)
+        } else if (target.name === 'bufferSize'){
+            setBufferSize(target.value)
+        }
+    }
 
     function handleChangeWriteBufferContent({target}){
         setWriteBufferContent(target.value)
@@ -134,27 +126,23 @@ function App() {
 
     async function handleWritePort(){
         const writer = port.writable.getWriter()
+        const encoder = new TextEncoder()
         try {
-            var mystr = writeBufferContent
-            var myarr = mystr.split(' ').map(elem => parseInt(elem))
-            var mybuf = new Uint8Array(myarr)
-            console.log('i write')
-            console.log(mybuf)
-            await writer.write(mybuf)
+            await writer.write(encoder.encode(writeBufferContent))
         } catch (err) {
             console.log(`error in handleChangeWriteBufferContent: ${err}`)
         } finally {
             writer.releaseLock();
+            console.log(`i wrote: "${writeBufferContent}"`)
             setWriteBufferContent("")
         }
     }
 
     async function handleReadPort(){
         setIsReading(true)
-        var lineBreakTransformStream = new TransformStream(new LineBreakTransformer());
-        readableStreamClosed.current = port.readable.pipeTo(lineBreakTransformStream.writable);
-        reader.current = lineBreakTransformStream.readable.getReader()
-        
+        textDecoder = new TextDecoderStream();
+        readableStreamClosed.current = port.readable.pipeTo(textDecoder.writable);
+        reader.current = textDecoder.readable.getReader()
         try {
             while (true) {
                 const { value, done } = await reader.current.read()
@@ -163,10 +151,8 @@ function App() {
                   reader.current.releaseLock()
                   break
                 }
-                readerAccumulated += value+'\n'
-                console.log('i read')
-                console.log(value)
-                setReadDataContent(readerAccumulated)
+                console.log(`i read: "${value}"`)
+                setReadDataContent(value)
             }
         } catch (err){
             console.log(`error in handleReadPort: ${err}`)
@@ -174,12 +160,10 @@ function App() {
     }
 
     async function handleStopReadingPort(){
-        if(isReading){
-            setIsReading(false)
-            //setReadDataContent('')
-            reader.current.cancel();
-            await readableStreamClosed.current.catch(() => { /* Ignore the error */ }); 
-        }
+        setIsReading(false)
+        setReadDataContent('')
+        reader.current.cancel();
+        await readableStreamClosed.current.catch(() => { /* Ignore the error */ }); 
     }
 
   return (
@@ -189,20 +173,29 @@ function App() {
                 <h3>connect port</h3>
                 <div className='portConnectionGroup'>
                     <div>
-                    <button onClick={handleConnection} >{port!==null? 'disconnect':'connect'}</button>
+                        <button onClick={handleConnection} disabled={isReading? true:false}>{port!==null? 'disconnect':'connect'}</button>
+                    </div>
+                    <DropDown name="baudRate" value={baudRate} items={baudRateOptions} onChange={handleChangeOption} isDisabled={port!==null? true:false}/>
+                    <DropDown name="dataBits" value={dataBits} items={dataBitsOptions} onChange={handleChangeOption} isDisabled={port!==null? true:false}/>
+                    <DropDown name="parity" value={parity} items={parityOptions} onChange={handleChangeOption} isDisabled={port!==null? true:false}/>
+                    <DropDown name="stopBits" value={stopBits} items={stopBitsOptions} onChange={handleChangeOption} isDisabled={port!==null? true:false}/>
+                    <DropDown name="flowControl" value={flowControl} items={FlowControlOptions} onChange={handleChangeOption} isDisabled={port!==null? true:false}/>
+                    <div className="portOpenOptionField">
+                        <label htmlFor="bufferSize">bufferSize</label>
+                        <input type="text" name="bufferSize" value={bufferSize} onChange={handleChangeOption} disabled={port!==null? true:false}/>
                     </div>
                 </div>
             </div>
             <div className="part">
                 <h3>write port</h3>
-                <textarea type="text" value={writeBufferContent} onChange={handleChangeWriteBufferContent} disabled={port!==null? false:true} placeholder={port!==null? "write something":"port is not connected"}></textarea> 
+                <textarea type="text" value={writeBufferContent} onChange={handleChangeWriteBufferContent} disabled={port!==null? false:true} placeholder={port!==null? "write something":"cannot write, port is not connected"}></textarea> 
                 <div>
                     <button onClick={handleWritePort} disabled={port!==null? false:true}>write</button>
                 </div>
             </div>
             <div className="part">
                 <h3>read port</h3>
-                <textarea value={readDataContent} disabled={true} placeholder={port!==null? (isReading? readDataContent:''):"port is not connected"}></textarea>
+                <textarea value={readDataContent} disabled={readDataContent!==""? false:true} placeholder={port!==null? (isReading? readDataContent:`click 'read' button to start reading`):"cannot read, port is not connected"}></textarea> 
                 <div>
                     <button onClick={isReading? handleStopReadingPort:handleReadPort} disabled={port!==null? false:true}>{isReading? 'stop read':'read'}</button>
                 </div>
