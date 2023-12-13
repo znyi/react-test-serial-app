@@ -7,62 +7,66 @@ const defaultParity = 'none'
 const defaultStopBits = 1
 const defaultFlowControl = 'none'
 
-class LineBreakTransformer {
+const filterEvenElements = (array) => {
+    return array.filter((e, i) => !(i % 2))
+}
 
-    terminator = [0x0D, 0x0A] //\r\n
+class LineBreakTransformer {
+    terminator = [0x0d, 0x0a] //\r\n
     terminatorIndex
 
     constructor() {
-      this.container = [];
+        this.container = []
     }
-  
+
     transform(chunk, controller) {
-        
-        // Append everything in chunk to the container
-        chunk.forEach(elem=>this.container.push(elem));
-      
-    
-        // Find the index of the terminator in the container
-        this.terminatorIndex = this.indexOfSubarray(this.container, this.terminator);
-
+        chunk.forEach((elem) => this.container.push(elem))
+        this.terminatorIndex = this.indexOfSubarray(
+            this.container,
+            this.terminator
+        )
         while (this.terminatorIndex !== -1) {
-          // Extract the line (including terminator) from the container
-          const line = this.container.slice(0, this.terminatorIndex + this.terminator.length);
-        
-          // Enqueue the line
-          controller.enqueue(new Uint8Array(line.slice(0, -2))); //do not include \r and \n
+            const line = this.container.slice(
+                0,
+                this.terminatorIndex + this.terminator.length
+            )
+            
+            controller.enqueue(filterEvenElements(line.slice(0, -2))) //parse as normal array, take even elems, exclude \r and \n  
 
-          // Remove the processed line from the container
-          this.container = this.container.slice(this.terminatorIndex + this.terminator.length);
-
-          // Find the next occurrence of the terminator in the remaining container
-          this.terminatorIndex = this.indexOfSubarray(this.container, this.terminator);
+            this.container = this.container.slice(
+                this.terminatorIndex + this.terminator.length
+            )
+            this.terminatorIndex = this.indexOfSubarray(
+                this.container,
+                this.terminator
+            )
         }
     }
 
     flush(controller) {
         if (this.container.length > 0) {
-            controller.enqueue(new Uint8Array(this.container));
-            console.log('lineFlushed')
-            console.log(this.container)
+            controller.enqueue(new Uint8Array(this.container))
         }
     }
 
     indexOfSubarray(array, subArray) {
-      // Helper function to find the index of subArray in array
-      for (let i = 0; i <= array.length - subArray.length; i++) {
-        if (this.arraysEqual(array.slice(i, i + subArray.length), subArray)) {
-          return i;
+        for (let i = 0; i <= array.length - subArray.length; i++) {
+            if (
+                this.arraysEqual(array.slice(i, i + subArray.length), subArray)
+            ) {
+                return i
+            }
         }
-      }
-      return -1;
+        return -1
     }
 
     arraysEqual(arr1, arr2) {
-      // Helper function to check if two arrays are equal
-      return arr1.length === arr2.length && arr1.every((value, index) => value === arr2[index]);
+        return (
+            arr1.length === arr2.length &&
+            arr1.every((value, index) => value === arr2[index])
+        )
     }
-  }
+}
 
 function App() {
     const [port, setPort] = useState(null)
@@ -136,7 +140,7 @@ function App() {
         const writer = port.writable.getWriter()
         try {
             var mystr = writeBufferContent
-            var myarr = mystr.split(' ').map(elem => parseInt(elem))
+            var myarr = JSON.parse(mystr)//mystr.split(' ').map(elem => parseInt(elem))
             var mybuf = new Uint8Array(myarr)
             console.log('i write')
             console.log(mybuf)
@@ -163,7 +167,7 @@ function App() {
                   reader.current.releaseLock()
                   break
                 }
-                readerAccumulated += value+'\n'
+                readerAccumulated += '['+value+']\n\n'
                 console.log('i read')
                 console.log(value)
                 setReadDataContent(readerAccumulated)
